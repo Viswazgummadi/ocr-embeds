@@ -5,3 +5,5 @@ __pycache__/
 .DS_Store
 data/index/
 data/manual_tests/
+data/stress_test/
+data/stress_test_index/

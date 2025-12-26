@@ -134,7 +134,7 @@ def search(
                 unique_docs[filename]['preview'] = res['preview']
 
     # 5. Convert Dict back to List and Sort
-    # Sort by score ascending (lowest distance first)
+    # Sort by score DESCENDING (Highest score = Best match for Cosine/Inner Product)
     final_results = sorted(unique_docs.items(), key=lambda x: x[1]['score'], reverse=True)
 
     # 6. Slice to the user's requested 'k'
