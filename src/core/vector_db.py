@@ -22,7 +22,7 @@ class VectorStore:
     def create_index(self):
         """Initializes a new FAISS index."""
         # IndexFlatL2 is standard Euclidean distance search (good for general use)
-        self.index = faiss.IndexFlatL2(self.dimension)
+        self.index = faiss.IndexFlatIP(self.dimension)
         self.metadata = []
         logger.info("Created new FAISS index.")
 

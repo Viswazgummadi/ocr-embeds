@@ -16,7 +16,7 @@ class TextEmbedder:
         """
         try:
             # Generate embedding
-            embedding = self.model.encode(text)
+            embedding = self.model.encode(text, normalize_embeddings=True)
             return embedding
         except Exception as e:
             logger.error(f"Embedding failed: {e}")

@@ -12,7 +12,7 @@ from src import config
 from src.core.ocr import OCRProcessor
 from src.core.embedder import TextEmbedder
 from src.core.vector_db import VectorStore
-
+from src.utils.text_processor import chunk_text
 # Initialize App and UI
 app = typer.Typer(help="OCR Search Engine CLI")
 console = Console()
@@ -54,27 +54,31 @@ def index(
 
         for img_file in image_files:
             img_path = os.path.join(config.RAW_IMAGES_DIR, img_file)
-            
-            # (Optional Optimization) Check if already in metadata to skip
-            # For now, we process everything to keep it simple or if forced
-            
             progress.update(task, description=f"Reading [bold]{img_file}[/bold]...")
             
             # Step A: OCR
-            text = ocr.extract_text(img_path)
-            if not text:
-                console.print(f"[yellow]Skipped {img_file} (No text found)[/yellow]")
-                progress.advance(task)
+            full_text = ocr.extract_text(img_path)
+            if not full_text:
                 continue
 
-            # Step B: Embed
-            vector = embedder.embed_text(text)
-            
-            # Step C: Store
-            if vector is not None:
-                meta = {"filename": img_file, "text": text}
-                vector_db.add_item(vector, meta)
-                new_items_count += 1
+            # Step B: Chunking (The New Part)
+            # We use 500 chars per chunk with 100 char overlap
+            text_chunks = chunk_text(full_text, chunk_size=500, overlap=100)
+
+            # Step C: Embed & Store EACH chunk
+            for i, chunk in enumerate(text_chunks):
+                vector = embedder.embed_text(chunk)
+                
+                if vector is not None:
+                    # We store the same filename, but different text segments
+                    meta = {
+                        "filename": img_file, 
+                        "text": chunk, 
+                        "chunk_id": i,
+                        "total_chunks": len(text_chunks)
+                    }
+                    vector_db.add_item(vector, meta)
+                    new_items_count += 1
             
             progress.advance(task)
 
@@ -83,48 +87,75 @@ def index(
     
     console.print(Panel(f"[bold green]Indexing Complete![/bold green]\n\nIndexed Documents: {new_items_count}\nDatabase stored at: {config.INDEX_DIR}"))
 
-
 @app.command()
 def search(
-    query: str = typer.Argument(..., help="The text you want to find inside your images"),
-    k: int = typer.Option(3, "--top", "-k", help="Number of results to return")
+    query: str = typer.Argument(..., help="The text you want to find"),
+    k: int = typer.Option(3, "--top", "-k", help="Number of unique documents to return")
 ):
     """
-    Search your indexed documents using a natural language query.
+    Search indexed documents with Document-Level Grouping.
     """
-    # 1. Load Components (Fast load, models cached)
     if not os.path.exists(config.INDEX_FILE):
-        console.print("[bold red]Error:[/bold red] Index not found.")
-        console.print("Run [yellow]python main.py index[/yellow] first.")
+        console.print("[red]Index not found. Run 'python main.py index' first.[/red]")
         return
 
+    # 1. Init
     embedder = TextEmbedder(config.EMBEDDING_MODEL_NAME)
     vector_db = VectorStore(config.INDEX_FILE, config.METADATA_FILE, config.VECTOR_DIMENSION)
 
-    # 2. Embed Query
+    # 2. Embed
     query_vector = embedder.embed_text(query)
 
-    # 3. Search
-    results = vector_db.search(query_vector, top_k=k)
+    # 3. Search (OVERSAMPLING)
+    # We ask for k * 10 results to ensure we have enough unique files after grouping.
+    # If the user wants Top 3 docs, we fetch Top 30 chunks.
+    raw_results = vector_db.search(query_vector, top_k=k * 10)
 
-    # 4. Display Results
-    if not results:
+    # 4. Grouping & Aggregation (The "Re-ranking" Step)
+    unique_docs = {}
+
+    for res in raw_results:
+        filename = res['filename']
+        score = res['score'] # Remember: Lower is better for L2 Distance
+        
+        # If we haven't seen this file yet, add it.
+        # OR if we found a better chunk for an existing file, update the score/preview.
+        if filename not in unique_docs:
+            unique_docs[filename] = {
+                "score": score,
+                "preview": res['preview'],
+                "chunk_match": res['preview'] # The specific text that matched
+            }
+        else:
+            # For Inner Product (Cosine Similarity since normalized), HIGHER is Better.
+            # If we found a chunk with a HIGHER score, keep that one.
+            if score > unique_docs[filename]['score']:
+                unique_docs[filename]['score'] = score
+                unique_docs[filename]['preview'] = res['preview']
+
+    # 5. Convert Dict back to List and Sort
+    # Sort by score ascending (lowest distance first)
+    final_results = sorted(unique_docs.items(), key=lambda x: x[1]['score'], reverse=True)
+
+    # 6. Slice to the user's requested 'k'
+    top_docs = final_results[:k]
+
+    # 7. Display
+    if not top_docs:
         console.print("[yellow]No matches found.[/yellow]")
         return
 
-    table = Table(title=f"Search Results for: '{query}'")
-    table.add_column("Score", justify="right", style="cyan", no_wrap=True)
+    table = Table(title=f"Top {k} Documents for: '{query}'")
+    table.add_column("Rank", style="dim")
+    table.add_column("Score", justify="right", style="cyan")
     table.add_column("Filename", style="magenta")
-    table.add_column("Text Preview", style="green")
+    table.add_column("Best Matching Snippet", style="green")
 
-    for res in results:
-        # Format score (lower L2 distance = better match, but let's just show raw for now)
-        score_display = f"{res['score']:.4f}"
+    for i, (fname, data) in enumerate(top_docs, 1):
+        score_display = f"{data['score']:.4f}"
+        snippet = data['preview'].replace('\n', ' ')[:100] + "..." # Truncate for clean table
         
-        # specific formatting
-        preview = res['preview'].replace('\n', ' ')
-        
-        table.add_row(score_display, res['filename'], preview)
+        table.add_row(str(i), score_display, fname, snippet)
 
     console.print(table)
 

@@ -4,21 +4,25 @@ A powerful, privacy-focused tool that extracts text from your local images and a
 
 ## 🏗 Architecture
 
-The system operates in a three-step pipeline:
+The system operates in a multi-stage pipeline designed for high accuracy:
 
-1.  **Optical Character Recognition (OCR)**:
-    *   **Tool**: Tesseract OCR
-    *   **Process**: Scans images in `data/raw` and extracts raw text string.
+1.  **Preprocessing & OCR**:
+    *   **Tools**: OpenCV & Tesseract
+    *   **Process**: Images are upscaled, binarized (black & white), and denoised using OpenCV to maximize text clarity before passing them to Tesseract OCR.
     *   **Code**: `src/core/ocr.py`
 
-2.  **Vector Embedding**:
-    *   **Model**: `all-MiniLM-L6-v2` (via `sentence-transformers`)
-    *   **Process**: Converts the extracted text into a 384-dimensional vector representation. This allows for semantic search (finding meaning, not just keyword matching).
+2.  **Text Chunking**:
+    *   **Process**: Long documents are split into overlapping chunks (500 chars). This ensures that specific details don't get lost in a large wall of text.
+    *   **Code**: `src/utils/text_processor.py`
+
+3.  **Vector Embedding**:
+    *   **Model**: `all-MiniLM-L6-v2`
+    *   **Process**: Converts text chunks into normalized 384-dimensional vectors.
     *   **Code**: `src/core/embedder.py`
 
-3.  **Vector Database**:
-    *   **Tool**: FAISS (Facebook AI Similarity Search)
-    *   **Process**: Stores the vectors and metadata (filenames, original text) for efficient similarity retrieval.
+4.  **Vector Database (Cosine Similarity)**:
+    *   **Tool**: FAISS (IndexFlatIP)
+    *   **Process**: Stores vectors and retrieves them using **Cosine Similarity**. Search results are grouped by filename, so you always get the best matching snippet for each document.
     *   **Code**: `src/core/vector_db.py`
 
 ---
@@ -29,7 +33,7 @@ The system operates in a three-step pipeline:
 - **Python 3.9+**
 - **Tesseract OCR Engine**:
     - **Windows**: [Download Installer](https://github.com/UB-Mannheim/tesseract/wiki)
-    - Add Tesseract to your System PATH or update `src/core/ocr.py` if needed.
+    - Add Tesseract to your System PATH.
 
 ### 2. Setup
 Clone the repository and install dependencies:
@@ -50,30 +54,31 @@ pip install -r requirements.txt
 Place your images (PNG, JPG, TIFF) into the `data/raw/` folder.
 
 ### 2. Manual Verification (Optional)
-If you want to check if the OCR is working correctly on a specific image:
+Check how the new OpenCV pre-processing handles your images:
 
 ```bash
 python main.py test-ocr image_name.png
 ```
-*   **Output**: Prints text to console and saves it to `data/manual_tests/image_name.txt`.
+*   **Output**: Prints the extracted text to the console and saves it to `data/manual_tests/`.
 
 ### 3. Build Index
-Scan all images and build the searchable database:
+Scan images, process text, chunk it, and build the search index.
+**Note**: If you changed code or added new images, you can force a rebuild:
 
 ```bash
-python main.py index
+python main.py index --force
 ```
 
 ### 4. Search
-Search your documents using natural language:
+Search your documents. The results will show the **Score** (Higher is Better) and the specific snippet that matched.
 
 ```bash
-python main.py search "invoice from amazon"
-python main.py search "meeting notes about project alpha"
+# Return top 3 documents
+python main.py search "invoice from amazon" -k 3
 ```
 
 ### 5. Check Status
-View database stats:
+View database stats (Total chunks indexed):
 
 ```bash
 python main.py info
@@ -87,14 +92,16 @@ python main.py info
 ocr-search-engine/
 ├── data/
 │   ├── raw/             # DROP YOUR IMAGES HERE
-│   ├── index/           # FAISS Index & Metadata (Generated)
-│   └── manual_tests/    # Text outputs from 'test-ocr'
+│   ├── index/           # FAISS Index & Metadata
+│   └── manual_tests/    # Debug output from 'test-ocr'
 ├── src/
 │   ├── core/
-│   │   ├── ocr.py       # Tesseract Wrapper
-│   │   ├── embedder.py  # SentenceTransformer Wrapper
-│   │   └── vector_db.py # FAISS Wrapper
-│   └── config.py        # Path settings
-├── main.py              # CLI Entry Point
-└── requirements.txt     # Python Dependencies
+│   │   ├── ocr.py       # OpenCV + Tesseract Logic
+│   │   ├── embedder.py  # Embedding Logic
+│   │   └── vector_db.py # FAISS Vector Store
+│   ├── utils/
+│   │   └── text_processor.py # Chunking Logic
+│   └── config.py
+├── main.py              # CLI Application
+└── requirements.txt
 ```
