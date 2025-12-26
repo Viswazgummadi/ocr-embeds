@@ -1,0 +1,75 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\geometry{a4paper, margin=1in}
+
+\title{\textbf{Local OCR Search Engine: Technical Report}}
+\author{Viswa Z Gummadi}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This report documents the development of a privacy-focused, local-first OCR Search Engine. The goal was to build a system capable of extracting text from local images (invoices, screenshot notes, posters) and enabling semantic search without relying on cloud APIs.
+
+\section{Phase 1: Initial Architecture}
+The initial prototype consisted of a simple three-stage pipeline:
+\begin{enumerate}
+    \item \textbf{OCR}: Using \texttt{pytesseract} (Tesseract OCR wrapper) to extract raw text.
+    \item \textbf{Embedding}: Using \texttt{sentence-transformers} (\textit{all-MiniLM-L6-v2}) to convert full text blocks into vectors.
+    \item \textbf{Vector Store}: Using \texttt{faiss-cpu} with an L2 (Euclidean) distance metric for similarity search.
+\end{enumerate}
+
+\section{Phase 2: Challenges Experienced}
+During initial testing, several critical issues were identified:
+\begin{itemize}
+    \item \textbf{Poor OCR on Stylized Text}: Tesseract failed to read text on noisy backgrounds or stylized fonts (e.g., "NO PAIN NO GAIN" posters).
+    \item \textbf{Semantic Dilution}: Embedding the \textit{entire} document text into a single vector caused specific details to get lost ("lost in the middle" phenomenon).
+    \item \textbf{Counter-Intuitive Scoring}: The L2 metric meant that a \textit{lower} score was better, which was confusing for ranking logic.
+\end{itemize}
+
+\section{Phase 3: Optimization & Refinement}
+To address these challenges, we implemented a series of major architectural upgrades.
+
+\subsection{3.1 Advanced Preprocessing (OpenCV)}
+We introduced an OpenCV-based preprocessing pipeline in \texttt{src/core/ocr.py}:
+\begin{itemize}
+    \item \textbf{Upscaling}: Resizing images by 3x (Cubic Interpolation) to improve character definition.
+    \item \textbf{Binary Inverse Thresholding}: Converting images to high-contrast Black \& White, specifically targeting posters where text is often lighter than the background.
+    \item \textbf{Dilation}: "Thickening" thin fonts so Tesseract can recognize them more easily.
+\end{itemize}
+
+\subsection{3.2 Text Chunking}
+We moved from whole-document embedding to a \textbf{Chunking Strategy}:
+\begin{itemize}
+    \item \textbf{Size}: 500 characters per chunk.
+    \item \textbf{Overlap}: 100 characters (to preserve context across boundaries).
+\end{itemize}
+This allows the vector database to find specific "needles" in the "haystack" of a document.
+
+\subsection{3.3 Metric Switch: Cosine Similarity}
+We switched the FAISS index from \texttt{IndexFlatL2} (Euclidean) to \texttt{IndexFlatIP} (Inner Product). 
+By normalizing the embeddings before insertion, Inner Product becomes mathematically equivalent to \textbf{Cosine Similarity}.
+\begin{itemize}
+    \item \textbf{Benefit}: Higher scores now equal better matches (Score 1.0 = Exact Match).
+    \item \textbf{Bug Fix}: We corrected the sorting logic in \texttt{main.py} to sort results in \textbf{Descending} order.
+\end{itemize}
+
+\section{Phase 4: Verification \& Stress Testing}
+To ensure robustness, we created a comprehensive stress test suite (\texttt{tests/stress\_test.py}) that verifies:
+\begin{enumerate}
+    \item \textbf{Chunking Logic}: Ensuring text splits happen at correct boundaries.
+    \item \textbf{Sorting Integrity}: Confirming that a closer vector match yields a technically higher score.
+    \item \textbf{Mass Indexing}: Simulating the indexing of 1000 documents to verify database persistence and performance.
+\end{enumerate}
+
+\section{Conclusion}
+The final system is a robust, highly accurate local search engine. It successfully handles noisy images via Computer Vision, retrieves granular details via Chunking, and ranks results intuitively using Cosine Similarity.
+
+\end{document}

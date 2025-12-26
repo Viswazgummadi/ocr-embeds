@@ -84,6 +84,13 @@ View database stats (Total chunks indexed):
 python main.py info
 ```
 
+### 6. Run Stress Tests
+Verify the system's integrity (Sort order, Chunking logic):
+
+```bash
+python -m tests.stress_test
+```
+
 ---
 
 ## 📂 Project Structure
