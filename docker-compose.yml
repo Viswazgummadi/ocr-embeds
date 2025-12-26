@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  ocr-search:
+    build: .
+    container_name: ocr_search_cli
+    volumes:
+      # Maps your local 'data' folder to the container
+      - ./data:/app/data
+      # Maps your source code so you can edit in Windows and run in Docker
+      - ./src:/app/src
+      - ./main.py:/app/main.py
+    environment:
+      - LOG_LEVEL=INFO
+    # This keeps the container running so you can enter it to use the CLI
+    command: tail -f /dev/null
